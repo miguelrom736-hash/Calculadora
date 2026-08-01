@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import sqlite3
+import psycopg2
 import json
 import datetime
 import requests
@@ -14,7 +14,6 @@ st.set_page_config(page_title="Calculadora RSV - ERP Cotizador", layout="wide")
 if 'cart' not in st.session_state:
     st.session_state.cart = []
 
-# Persistencia de datos del cliente
 if 'c_name_val' not in st.session_state:
     st.session_state.c_name_val = ""
 if 'c_doc_val' not in st.session_state:
@@ -24,24 +23,21 @@ if 'c_phone_val' not in st.session_state:
 
 st.markdown("""
 <style>
-    /* 1. Tarjetas de métricas oscuras (Tasa BCV) */
     .stMetric { background: #1e293b; padding: 15px; border-radius: 10px; border: 1px solid #334155; }
     .stMetric * { color: #f8fafc !important; }
     h1, h2, h3 { color: #38bdf8; }
 
-    /* 2. BORDES NEGROS VISIBLES EN TODOS LOS CAMPOS DE LA APP */
-    div[data-testid="stTextInputRootElement"],        /* Campos de texto */
-    div[data-testid="stNumberInputContainer"],        /* Campos numéricos */
-    div[data-testid="stSelectbox"] div.react-aria-ComboBox > div, /* Selectores nuevos */
-    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div, /* Selectores antiguos */
-    div[data-testid="stDateInput"] div[data-baseweb="input"] { /* Campos de Fecha */
+    div[data-testid="stTextInputRootElement"],
+    div[data-testid="stNumberInputContainer"],
+    div[data-testid="stSelectbox"] div.react-aria-ComboBox > div,
+    div[data-testid="stSelectbox"] div[data-baseweb="select"] > div,
+    div[data-testid="stDateInput"] div[data-baseweb="input"] {
         border-color: #000000 !important;
         border-style: solid !important;
         border-width: 1px !important;
         border-radius: 8px !important;
     }
 
-    /* 3. Efecto al hacer clic (Foco) */
     div[data-testid="stTextInputRootElement"]:focus-within,
     div[data-testid="stNumberInputContainer"]:focus-within,
     div[data-testid="stSelectbox"] div.react-aria-ComboBox > div:focus-within,
@@ -54,18 +50,19 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. CAPA DE DATOS (calculadoraRsv.db)
+# 2. CAPA DE DATOS (SUPABASE / POSTGRESQL)
 # ==========================================
-DB_NAME = "calculadoraRsv.db"
+def get_connection():
+    # Lee la URL de la base de datos desde los secretos de Streamlit
+    return psycopg2.connect(st.secrets["database"]["url"])
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    conn.execute("PRAGMA foreign_keys = 1")
+    conn = get_connection()
     cursor = conn.cursor()
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS suppliers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT UNIQUE NOT NULL,
             discount REAL DEFAULT 0
         )
@@ -73,12 +70,11 @@ def init_db():
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS products (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            supplier_id INTEGER,
+            id SERIAL PRIMARY KEY,
+            supplier_id INTEGER REFERENCES suppliers(id) ON DELETE CASCADE,
             name TEXT UNIQUE NOT NULL,
             base_cost REAL NOT NULL,
-            profit_margin REAL DEFAULT 30,
-            FOREIGN KEY(supplier_id) REFERENCES suppliers(id) ON DELETE CASCADE
+            profit_margin REAL DEFAULT 30
         )
     """)
     
@@ -88,12 +84,12 @@ def init_db():
             value REAL NOT NULL
         )
     """)
-    cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('tasa_usd', 0.0)")
-    cursor.execute("INSERT OR IGNORE INTO config (key, value) VALUES ('tasa_eur', 0.0)")
+    cursor.execute("INSERT INTO config (key, value) VALUES ('tasa_usd', 0.0) ON CONFLICT (key) DO NOTHING")
+    cursor.execute("INSERT INTO config (key, value) VALUES ('tasa_eur', 0.0) ON CONFLICT (key) DO NOTHING")
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS saved_budgets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             date TEXT NOT NULL,
             client_name TEXT NOT NULL,
             client_doc TEXT NOT NULL,
@@ -107,42 +103,30 @@ def init_db():
         )
     """)
     conn.commit()
+    cursor.close()
     conn.close()
 
 def run_query(query, params=(), fetch=True):
-    conn = sqlite3.connect(DB_NAME)
-    conn.execute("PRAGMA foreign_keys = 1")
+    # Convierte la sintaxis de SQLite (?) a PostgreSQL (%s) automáticamente
+    query = query.replace("?", "%s")
+    
+    conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute(query, params)
-    conn.commit()
-    if fetch:
-        columns = [col[0] for col in cursor.description] if cursor.description else []
-        data = cursor.fetchall()
+    try:
+        cursor.execute(query, params)
+        conn.commit()
+        if fetch:
+            columns = [col[0] for col in cursor.description] if cursor.description else []
+            data = cursor.fetchall()
+            return pd.DataFrame(data, columns=columns) if data else pd.DataFrame(columns=columns)
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        cursor.close()
         conn.close()
-        return pd.DataFrame(data, columns=columns) if data else pd.DataFrame(columns=columns)
-    conn.close()
 
-def reorder_ids(table_name):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(f"CREATE TABLE temp_table AS SELECT * FROM {table_name}")
-    cursor.execute(f"DELETE FROM {table_name}")
-    cursor.execute(f"DELETE FROM sqlite_sequence WHERE name='{table_name}'")
-    
-    df_temp = pd.read_sql_query("SELECT * FROM temp_table", conn)
-    if 'id' in df_temp.columns:
-        df_temp = df_temp.drop(columns=['id'])
-    
-    cols = ", ".join(df_temp.columns)
-    placeholders = ", ".join(["?"] * len(df_temp.columns))
-    
-    for _, row in df_temp.iterrows():
-        cursor.execute(f"INSERT INTO {table_name} ({cols}) VALUES ({placeholders})", tuple(row))
-        
-    cursor.execute("DROP TABLE temp_table")
-    conn.commit()
-    conn.close()
-
+# Iniciar la base de datos automáticamente al abrir la app
 init_db()
 
 def get_config(key):
@@ -319,7 +303,7 @@ if menu == "🏢 Proveedores":
                 try:
                     run_query("INSERT INTO suppliers (name, discount) VALUES (?, ?)", (s_name.strip(), s_disc), fetch=False)
                     st.toast("¡Proveedor guardado exitosamente!", icon="🏢")
-                except sqlite3.IntegrityError:
+                except psycopg2.IntegrityError:
                     st.error("El proveedor ya existe en la base de datos.")
                     
     st.divider()
@@ -341,7 +325,6 @@ if menu == "🏢 Proveedores":
         supp_to_delete = st.selectbox("Selecciona proveedor a eliminar", df_supp['Proveedor'].tolist(), key="del_supp_select")
         if st.button("Eliminar Proveedor Seleccionado"):
             run_query("DELETE FROM suppliers WHERE name=?", (supp_to_delete,), fetch=False)
-            reorder_ids("suppliers")
             st.toast(f"Proveedor '{supp_to_delete}' eliminado.", icon="🗑️")
             st.rerun()
     else:
@@ -376,7 +359,7 @@ elif menu == "📦 Productos":
                             run_query("INSERT INTO products (supplier_id, name, base_cost, profit_margin) VALUES (?, ?, ?, ?)",
                                       (sup_id, p_name.strip(), p_cost, p_margin), fetch=False)
                             st.toast("¡Producto guardado exitosamente!", icon="📦")
-                        except sqlite3.IntegrityError:
+                        except psycopg2.IntegrityError:
                             st.error("El nombre del producto ya existe en el catálogo.")
 
         st.divider()
@@ -424,12 +407,11 @@ elif menu == "📦 Productos":
                         """, (sup_id, nuevo_nombre.strip(), nuevo_costo, nuevo_margen, selected_prod['id']), fetch=False)
                         st.toast("¡Producto actualizado!", icon="✏️")
                         st.rerun()
-                    except sqlite3.IntegrityError:
+                    except psycopg2.IntegrityError:
                         st.error("Ya existe otro producto registrado con ese nombre.")
 
                 if btn_delete:
                     run_query("DELETE FROM products WHERE id=?", (selected_prod['id'],), fetch=False)
-                    reorder_ids("products")
                     st.toast("Producto eliminado del inventario.", icon="🗑️")
                     st.rerun()
 
@@ -730,7 +712,6 @@ elif menu == "📂 Historial":
                     c_h1.download_button(f"📄 Descargar PDF de {row_sel['client_name']}", data=pdf_bytes, file_name=f"Presupuesto_{row_sel['client_name']}.pdf", mime="application/pdf", key="dl_pdf_h_d", use_container_width=True)
                     if c_h2.button("🗑️ Eliminar Presupuesto", key="del_budg_d", use_container_width=True):
                         run_query("DELETE FROM saved_budgets WHERE id=?", (row_sel['id'],), fetch=False)
-                        reorder_ids("saved_budgets")
                         st.toast("Presupuesto eliminado con éxito.", icon="🗑️")
                         st.rerun()
             else:
@@ -773,7 +754,6 @@ elif menu == "📂 Historial":
                     col_ha1.download_button(f"📄 Descargar PDF de {row_sel_a['client_name']}", data=pdf_bytes_a, file_name=f"Presupuesto_{row_sel_a['client_name']}.pdf", mime="application/pdf", key="dl_pdf_h_a", use_container_width=True)
                     if col_ha2.button("🗑️ Eliminar Presupuesto del Historial", key="del_budg_a", use_container_width=True):
                         run_query("DELETE FROM saved_budgets WHERE id=?", (row_sel_a['id'],), fetch=False)
-                        reorder_ids("saved_budgets")
                         st.toast("Presupuesto eliminado con éxito.", icon="🗑️")
                         st.rerun()
             else:
