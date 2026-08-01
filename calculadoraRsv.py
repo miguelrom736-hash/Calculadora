@@ -250,7 +250,7 @@ def generate_profit_report_pdf(title, period_label, total_usd, total_eur, total_
 # 5. NAVEGACIÓN LATERAL Y GESTIÓN DE TASAS
 # ==========================================
 with st.sidebar:
-    st.title("⚙️ Calculadora RSV")[cite: 1]
+    st.title("⚙️ Calculadora RSV")
     menu = st.radio("Navegación", ["🏢 Proveedores", "📦 Productos", "📝 Nuevo Presupuesto", "📈 Ganancias", "📂 Historial"])
     
     st.divider()
