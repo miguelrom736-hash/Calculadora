@@ -2,3 +2,5 @@ streamlit
 pandas
 requests
 fpdf
+psycopg2-binary
+sqlalchemy
