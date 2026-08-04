@@ -78,6 +78,7 @@ ALL_SYSTEM_MODULES = [
 def get_connection():
     return psycopg2.connect(st.secrets["database"]["url"])
 
+@st.cache_resource
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
@@ -154,20 +155,17 @@ def init_db():
         )
     """)
     
-    # Crear roles por defecto si no existen
     cursor.execute("SELECT COUNT(*) FROM public.roles")
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT INTO public.roles (name) VALUES ('Administrador')")
         cursor.execute("INSERT INTO public.roles (name) VALUES ('Vendedor')")
         
-        # Asignar permisos por defecto a Administrador
         for m in ALL_SYSTEM_MODULES:
-            cursor.execute("INSERT INTO public.role_permissions (role_name, module_name) VALUES ('Administrador', ?) ON CONFLICT DO NOTHING", (m,))
+            cursor.execute("INSERT INTO public.role_permissions (role_name, module_name) VALUES ('Administrador', %s) ON CONFLICT DO NOTHING", (m,))
             
-        # Asignar permisos por defecto a Vendedor
         vendedor_modules = ["🏢 Proveedores", "📦 Productos", "📝 Nuevo Presupuesto", "📈 Ganancias", "📂 Historial"]
         for m in vendedor_modules:
-            cursor.execute("INSERT INTO public.role_permissions (role_name, module_name) VALUES ('Vendedor', ?) ON CONFLICT DO NOTHING", (m,))
+            cursor.execute("INSERT INTO public.role_permissions (role_name, module_name) VALUES ('Vendedor', %s) ON CONFLICT DO NOTHING", (m,))
 
     cursor.execute("SELECT COUNT(*) FROM public.users")
     if cursor.fetchone()[0] == 0:
@@ -188,6 +186,8 @@ def init_db():
     cursor.close()
     conn.close()
 
+init_db()
+
 def run_query(query, params=(), fetch=True):
     query = query.replace("?", "%s")
     conn = get_connection()
@@ -205,8 +205,6 @@ def run_query(query, params=(), fetch=True):
     finally:
         cursor.close()
         conn.close()
-
-init_db()
 
 def get_config(key):
     df = run_query("SELECT value FROM public.config WHERE key = ?", (key,))
@@ -365,10 +363,9 @@ with st.sidebar:
     st.write(f"👤 Usuario: **{st.session_state.username}**")
     st.write(f"🛡️ Rol: **{st.session_state.role}**")
     
-    # Filtrar menús disponibles según los permisos del rol en la base de datos
     menu_options = [m for m in ALL_SYSTEM_MODULES if check_permission(st.session_state.role, m)]
     if not menu_options:
-        menu_options = ["📝 Nuevo Presupuesto"] # Fallback por seguridad
+        menu_options = ["📝 Nuevo Presupuesto"]
         
     menu = st.radio("Navegación", menu_options)
     
@@ -1003,7 +1000,6 @@ elif menu == "🛡️ Roles y Permisos":
                     selected_modules.append(mod)
                     
             if st.form_submit_button("💾 Guardar Permisos del Rol", use_container_width=True):
-                # Borrar permisos actuales de este rol y reinsertar
                 run_query("DELETE FROM public.role_permissions WHERE role_name = ?", (selected_role_config,), fetch=False)
                 for m in selected_modules:
                     run_query("INSERT INTO public.role_permissions (role_name, module_name) VALUES (?, ?)", (selected_role_config, m), fetch=False)
