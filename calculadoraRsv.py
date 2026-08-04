@@ -65,6 +65,16 @@ st.markdown("""
 # ==========================================
 # 2. CAPA DE DATOS (SUPABASE / POSTGRESQL)
 # ==========================================
+ALL_SYSTEM_MODULES = [
+    "🏢 Proveedores", 
+    "📦 Productos", 
+    "📝 Nuevo Presupuesto", 
+    "📈 Ganancias", 
+    "📂 Historial", 
+    "👥 Usuarios", 
+    "🛡️ Roles y Permisos"
+]
+
 def get_connection():
     return psycopg2.connect(st.secrets["database"]["url"])
 
@@ -127,7 +137,38 @@ def init_db():
             role TEXT NOT NULL
         )
     """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS public.roles (
+            id SERIAL PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS public.role_permissions (
+            id SERIAL PRIMARY KEY,
+            role_name TEXT NOT NULL,
+            module_name TEXT NOT NULL,
+            UNIQUE(role_name, module_name)
+        )
+    """)
     
+    # Crear roles por defecto si no existen
+    cursor.execute("SELECT COUNT(*) FROM public.roles")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO public.roles (name) VALUES ('Administrador')")
+        cursor.execute("INSERT INTO public.roles (name) VALUES ('Vendedor')")
+        
+        # Asignar permisos por defecto a Administrador
+        for m in ALL_SYSTEM_MODULES:
+            cursor.execute("INSERT INTO public.role_permissions (role_name, module_name) VALUES ('Administrador', ?) ON CONFLICT DO NOTHING", (m,))
+            
+        # Asignar permisos por defecto a Vendedor
+        vendedor_modules = ["🏢 Proveedores", "📦 Productos", "📝 Nuevo Presupuesto", "📈 Ganancias", "📂 Historial"]
+        for m in vendedor_modules:
+            cursor.execute("INSERT INTO public.role_permissions (role_name, module_name) VALUES ('Vendedor', ?) ON CONFLICT DO NOTHING", (m,))
+
     cursor.execute("SELECT COUNT(*) FROM public.users")
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT INTO public.users (username, password, role) VALUES ('admin', 'admin123', 'Administrador')")
@@ -173,6 +214,10 @@ def get_config(key):
 
 def set_config(key, value):
     run_query("UPDATE public.config SET value = ? WHERE key = ?", (float(value), key), fetch=False)
+
+def check_permission(role_name, module_name):
+    df = run_query("SELECT 1 FROM public.role_permissions WHERE role_name = ? AND module_name = ?", (role_name, module_name))
+    return not df.empty
 
 # ==========================================
 # 3. AUTENTICACIÓN Y LOGIN
@@ -320,9 +365,10 @@ with st.sidebar:
     st.write(f"👤 Usuario: **{st.session_state.username}**")
     st.write(f"🛡️ Rol: **{st.session_state.role}**")
     
-    menu_options = ["🏢 Proveedores", "📦 Productos", "📝 Nuevo Presupuesto", "📈 Ganancias", "📂 Historial"]
-    if st.session_state.role == 'Administrador':
-        menu_options.append("👥 Usuarios")
+    # Filtrar menús disponibles según los permisos del rol en la base de datos
+    menu_options = [m for m in ALL_SYSTEM_MODULES if check_permission(st.session_state.role, m)]
+    if not menu_options:
+        menu_options = ["📝 Nuevo Presupuesto"] # Fallback por seguridad
         
     menu = st.radio("Navegación", menu_options)
     
@@ -676,7 +722,6 @@ elif menu == "📈 Ganancias":
         df_history['date_dt'] = pd.to_datetime(df_history['date'])
         df_history['fecha'] = df_history['date_dt'].dt.strftime('%Y-%m-%d')
         
-        # Filtramos solo los aprobados para ganancias
         df_approved = df_history[df_history['status'] == 'Aprobado']
         
         tab_dia, tab_totales = st.tabs(["📅 Consulta por Día", "🗓️ Consulta Acumulada (Semana / Mes / Total)"])
@@ -878,16 +923,20 @@ elif menu == "📂 Historial":
                 st.info("No hay presupuestos dentro del rango seleccionado.")
 
 # ==========================================
-# 12. MÓDULO: USUARIOS (SOLO ADMINISTRADOR)
+# 12. MÓDULO: USUARIOS
 # ==========================================
-elif menu == "👥 Usuarios" and st.session_state.role == 'Administrador':
-    st.header("👥 Gestión de Usuarios y Roles")
+elif menu == "👥 Usuarios":
+    st.header("👥 Gestión de Usuarios y Roles de Acceso")
     
     with st.form("new_user_form", clear_on_submit=True):
         st.subheader("Crear Nuevo Usuario")
         new_u = st.text_input("Nombre de Usuario")
         new_p = st.text_input("Contraseña", type="password")
-        new_r = st.selectbox("Rol", ["Administrador", "Vendedor"])
+        
+        df_roles_list = run_query("SELECT name FROM public.roles")
+        role_options = df_roles_list['name'].tolist() if not df_roles_list.empty else ["Administrador", "Vendedor"]
+        new_r = st.selectbox("Rol Asignado", role_options)
+        
         if st.form_submit_button("Guardar Usuario"):
             if new_u.strip() and new_p.strip():
                 try:
@@ -913,3 +962,60 @@ elif menu == "👥 Usuarios" and st.session_state.role == 'Administrador':
             st.rerun()
         elif user_to_del == 'admin':
             st.info("El usuario administrador principal no se puede eliminar.")
+
+# ==========================================
+# 13. MÓDULO: ROLES Y PERMISOS
+# ==========================================
+elif menu == "🛡️ Roles y Permisos":
+    st.header("🛡️ Creación de Roles y Configuración de Permisos")
+    
+    with st.form("create_role_form", clear_on_submit=True):
+        st.subheader("Crear Nuevo Rol")
+        new_role_name = st.text_input("Nombre del Nuevo Rol (ej. Supervisor, Almacenista)")
+        if st.form_submit_button("Registrar Rol"):
+            if new_role_name.strip():
+                try:
+                    run_query("INSERT INTO public.roles (name) VALUES (?)", (new_role_name.strip(),), fetch=False)
+                    st.toast(f"¡Rol '{new_role_name.strip()}' creado con éxito!", icon="🛡️")
+                    st.rerun()
+                except psycopg2.IntegrityError:
+                    st.error("El rol ya existe.")
+            else:
+                st.error("Ingresa un nombre de rol válido.")
+                
+    st.divider()
+    st.subheader("Configurar Módulos Permitidos por Rol")
+    
+    df_roles_all = run_query("SELECT name FROM public.roles")
+    if not df_roles_all.empty:
+        role_list = df_roles_all['name'].tolist()
+        selected_role_config = st.selectbox("Selecciona el Rol a Configurar", role_list, key="sel_role_cfg")
+        
+        st.write(f"Selecciona los módulos a los que tendrá acceso el rol: **{selected_role_config}**")
+        
+        with st.form("permissions_form"):
+            current_perms = run_query("SELECT module_name FROM public.role_permissions WHERE role_name = ?", (selected_role_config,))['module_name'].tolist()
+            
+            selected_modules = []
+            for mod in ALL_SYSTEM_MODULES:
+                is_checked = mod in current_perms
+                if st.checkbox(mod, value=is_checked, key=f"chk_{mod}"):
+                    selected_modules.append(mod)
+                    
+            if st.form_submit_button("💾 Guardar Permisos del Rol", use_container_width=True):
+                # Borrar permisos actuales de este rol y reinsertar
+                run_query("DELETE FROM public.role_permissions WHERE role_name = ?", (selected_role_config,), fetch=False)
+                for m in selected_modules:
+                    run_query("INSERT INTO public.role_permissions (role_name, module_name) VALUES (?, ?)", (selected_role_config, m), fetch=False)
+                st.toast("¡Permisos actualizados correctamente!", icon="💾")
+                st.rerun()
+                
+        if selected_role_config not in ["Administrador", "Vendedor"]:
+            st.divider()
+            if st.button(f"🗑️ Eliminar Rol '{selected_role_config}'", use_container_width=True):
+                run_query("DELETE FROM public.roles WHERE name = ?", (selected_role_config,), fetch=False)
+                run_query("DELETE FROM public.role_permissions WHERE role_name = ?", (selected_role_config,), fetch=False)
+                st.toast(f"Rol '{selected_role_config}' eliminado.", icon="🗑️")
+                st.rerun()
+    else:
+        st.info("No hay roles creados.")
