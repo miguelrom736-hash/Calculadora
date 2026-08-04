@@ -20,6 +20,19 @@ if 'c_doc_val' not in st.session_state:
     st.session_state.c_doc_val = ""
 if 'c_phone_val' not in st.session_state:
     st.session_state.c_phone_val = ""
+if 'v_name_val' not in st.session_state:
+    st.session_state.v_name_val = ""
+if 'v_year_val' not in st.session_state:
+    st.session_state.v_year_val = ""
+if 'v_plate_val' not in st.session_state:
+    st.session_state.v_plate_val = ""
+
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'username' not in st.session_state:
+    st.session_state.username = ""
+if 'role' not in st.session_state:
+    st.session_state.role = ""
 
 st.markdown("""
 <style>
@@ -50,7 +63,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. CAPA DE DATOS (SUPABASE / POSTGRESQL)[cite: 1]
+# 2. CAPA DE DATOS (SUPABASE / POSTGRESQL)
 # ==========================================
 def get_connection():
     return psycopg2.connect(st.secrets["database"]["url"])
@@ -60,7 +73,7 @@ def init_db():
     cursor = conn.cursor()
     
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS suppliers (
+        CREATE TABLE IF NOT EXISTS public.suppliers (
             id SERIAL PRIMARY KEY,
             name TEXT UNIQUE NOT NULL,
             discount REAL DEFAULT 0
@@ -68,9 +81,9 @@ def init_db():
     """)
     
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS products (
+        CREATE TABLE IF NOT EXISTS public.products (
             id SERIAL PRIMARY KEY,
-            supplier_id INTEGER REFERENCES suppliers(id) ON DELETE CASCADE,
+            supplier_id INTEGER REFERENCES public.suppliers(id) ON DELETE CASCADE,
             name TEXT UNIQUE NOT NULL,
             base_cost REAL NOT NULL,
             profit_margin REAL DEFAULT 30
@@ -78,16 +91,16 @@ def init_db():
     """)
     
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS config (
+        CREATE TABLE IF NOT EXISTS public.config (
             key TEXT PRIMARY KEY,
             value REAL NOT NULL
         )
     """)
-    cursor.execute("INSERT INTO config (key, value) VALUES ('tasa_usd', 0.0) ON CONFLICT (key) DO NOTHING")
-    cursor.execute("INSERT INTO config (key, value) VALUES ('tasa_eur', 0.0) ON CONFLICT (key) DO NOTHING")
+    cursor.execute("INSERT INTO public.config (key, value) VALUES ('tasa_usd', 0.0) ON CONFLICT (key) DO NOTHING")
+    cursor.execute("INSERT INTO public.config (key, value) VALUES ('tasa_eur', 0.0) ON CONFLICT (key) DO NOTHING")
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS saved_budgets (
+        CREATE TABLE IF NOT EXISTS public.saved_budgets (
             id SERIAL PRIMARY KEY,
             date TEXT NOT NULL,
             client_name TEXT NOT NULL,
@@ -98,16 +111,44 @@ def init_db():
             total_foreign REAL NOT NULL,
             total_ves REAL NOT NULL,
             total_profit_foreign REAL DEFAULT 0.0,
-            items_json TEXT NOT NULL
+            items_json TEXT NOT NULL,
+            status TEXT DEFAULT 'Pendiente',
+            vehicle_name TEXT DEFAULT '',
+            vehicle_year TEXT DEFAULT '',
+            vehicle_plate TEXT DEFAULT ''
         )
     """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS public.users (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL
+        )
+    """)
+    
+    cursor.execute("SELECT COUNT(*) FROM public.users")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("INSERT INTO public.users (username, password, role) VALUES ('admin', 'admin123', 'Administrador')")
+
+    for col_def in [
+        "status TEXT DEFAULT 'Pendiente'",
+        "vehicle_name TEXT DEFAULT ''",
+        "vehicle_year TEXT DEFAULT ''",
+        "vehicle_plate TEXT DEFAULT ''"
+    ]:
+        try:
+            cursor.execute(f"ALTER TABLE public.saved_budgets ADD COLUMN IF NOT EXISTS {col_def}")
+        except Exception:
+            pass
+
     conn.commit()
     cursor.close()
     conn.close()
 
 def run_query(query, params=(), fetch=True):
     query = query.replace("?", "%s")
-    
     conn = get_connection()
     cursor = conn.cursor()
     try:
@@ -127,14 +168,37 @@ def run_query(query, params=(), fetch=True):
 init_db()
 
 def get_config(key):
-    df = run_query("SELECT value FROM config WHERE key = ?", (key,))
+    df = run_query("SELECT value FROM public.config WHERE key = ?", (key,))
     return float(df.iloc[0, 0]) if not df.empty else 0.0
 
 def set_config(key, value):
-    run_query("UPDATE config SET value = ? WHERE key = ?", (float(value), key), fetch=False)
+    run_query("UPDATE public.config SET value = ? WHERE key = ?", (float(value), key), fetch=False)
 
 # ==========================================
-# 3. CONSULTA DE TASAS VÍA DOLARAPI[cite: 1]
+# 3. AUTENTICACIÓN Y LOGIN
+# ==========================================
+if not st.session_state.logged_in:
+    st.title("🔐 Acceso al Sistema - Calculadora RSV")
+    col1, col2 = st.columns([1, 1])
+    with col1:
+        with st.form("login_form"):
+            u_input = st.text_input("Usuario")
+            p_input = st.text_input("Contraseña", type="password")
+            submit_login = st.form_submit_button("Iniciar Sesión", use_container_width=True)
+            if submit_login:
+                df_user = run_query("SELECT role FROM public.users WHERE username = ? AND password = ?", (u_input.strip(), p_input))
+                if not df_user.empty:
+                    st.session_state.logged_in = True
+                    st.session_state.username = u_input.strip()
+                    st.session_state.role = df_user.iloc[0]['role']
+                    st.success("¡Bienvenido!")
+                    st.rerun()
+                else:
+                    st.error("Usuario o contraseña incorrectos.")
+    st.stop()
+
+# ==========================================
+# 4. CONSULTA DE TASAS VÍA DOLARAPI
 # ==========================================
 @st.cache_data(ttl=300)
 def fetch_bcv_rates():
@@ -162,7 +226,7 @@ if get_config('tasa_eur') == 0.0 and api_eur:
     set_config('tasa_eur', api_eur)
 
 # ==========================================
-# 4. MOTOR PDF[cite: 1]
+# 5. MOTOR PDF
 # ==========================================
 class PDF(FPDF):
     def header(self):
@@ -171,7 +235,7 @@ class PDF(FPDF):
         self.cell(0, 10, 'CALCULADORA RSV - REPORTE OFICIAL', 0, 1, 'C')
         self.ln(5)
 
-def generate_pdf(client, doc, phone, date, cart, currency, rate_bcv, total_usd, total_ves):
+def generate_pdf(client, doc, phone, veh_name, veh_year, veh_plate, date, cart, currency, rate_bcv, total_usd, total_ves):
     pdf = PDF()
     pdf.add_page()
     
@@ -179,6 +243,8 @@ def generate_pdf(client, doc, phone, date, cart, currency, rate_bcv, total_usd, 
     pdf.cell(0, 5, f"Cliente: {client}", 0, 1)
     pdf.cell(0, 5, f"C.I / RIF: {doc}", 0, 1)
     pdf.cell(0, 5, f"Telefono: {phone}", 0, 1)
+    if veh_name or veh_year or veh_plate:
+        pdf.cell(0, 5, f"Vehiculo: {veh_name} | Año: {veh_year} | Placa: {veh_plate}", 0, 1)
     pdf.cell(0, 5, f"Fecha: {date}", 0, 1)
     pdf.ln(10)
     
@@ -218,7 +284,7 @@ def generate_profit_report_pdf(title, period_label, total_usd, total_eur, total_
     pdf.ln(5)
     
     pdf.set_font('Arial', 'B', 11)
-    pdf.cell(0, 7, "RESUMEN CONSOLIDADO DE GANANCIAS:", 0, 1)
+    pdf.cell(0, 7, "RESUMEN CONSOLIDADO DE GANANCIAS (APROBADAS):", 0, 1)
     pdf.set_font('Arial', '', 10)
     pdf.cell(60, 6, f"Ganancia USD: ${total_usd:,.2f}", 1)
     pdf.cell(60, 6, f"Ganancia EUR: {total_eur:,.2f}", 1)
@@ -247,12 +313,25 @@ def generate_profit_report_pdf(title, period_label, total_usd, total_eur, total_
     return pdf.output(dest="S").encode("latin1")
 
 # ==========================================
-# 5. NAVEGACIÓN LATERAL Y GESTIÓN DE TASAS
+# 6. NAVEGACIÓN LATERAL Y GESTIÓN DE TASAS
 # ==========================================
 with st.sidebar:
     st.title("⚙️ Calculadora RSV")
-    menu = st.radio("Navegación", ["🏢 Proveedores", "📦 Productos", "📝 Nuevo Presupuesto", "📈 Ganancias", "📂 Historial"])
+    st.write(f"👤 Usuario: **{st.session_state.username}**")
+    st.write(f"🛡️ Rol: **{st.session_state.role}**")
     
+    menu_options = ["🏢 Proveedores", "📦 Productos", "📝 Nuevo Presupuesto", "📈 Ganancias", "📂 Historial"]
+    if st.session_state.role == 'Administrador':
+        menu_options.append("👥 Usuarios")
+        
+    menu = st.radio("Navegación", menu_options)
+    
+    if st.button("🚪 Cerrar Sesión", use_container_width=True):
+        st.session_state.logged_in = False
+        st.session_state.username = ""
+        st.session_state.role = ""
+        st.rerun()
+
     st.divider()
     st.subheader("💱 Ajuste de Tasas BCV")
     
@@ -282,7 +361,7 @@ with st.sidebar:
         st.rerun()
 
 # ==========================================
-# 6. MÓDULO: PROVEEDORES
+# 7. MÓDULO: PROVEEDORES
 # ==========================================
 if menu == "🏢 Proveedores":
     st.header("Gestión de Proveedores")
@@ -298,14 +377,14 @@ if menu == "🏢 Proveedores":
                 st.error("Por favor ingrese el nombre del proveedor.")
             else:
                 try:
-                    run_query("INSERT INTO suppliers (name, discount) VALUES (?, ?)", (s_name.strip(), s_disc), fetch=False)
+                    run_query("INSERT INTO public.suppliers (name, discount) VALUES (?, ?)", (s_name.strip(), s_disc), fetch=False)
                     st.toast("¡Proveedor guardado exitosamente!", icon="🏢")
                 except psycopg2.IntegrityError:
                     st.error("El proveedor ya existe en la base de datos.")
                     
     st.divider()
     st.subheader("Directorio Activo")
-    df_supp = run_query("SELECT name, discount FROM suppliers")
+    df_supp = run_query("SELECT name, discount FROM public.suppliers")
     
     if not df_supp.empty:
         df_supp.columns = ['Proveedor', 'Descuento (%)']
@@ -313,7 +392,7 @@ if menu == "🏢 Proveedores":
         
         if st.button("💾 Actualizar Cambios de Proveedores"):
             for idx, row in edited_supp.iterrows():
-                run_query("UPDATE suppliers SET discount=? WHERE name=?", (row['Descuento (%)'], row['Proveedor']), fetch=False)
+                run_query("UPDATE public.suppliers SET discount=? WHERE name=?", (row['Descuento (%)'], row['Proveedor']), fetch=False)
             st.toast("Cambios aplicados correctamente.", icon="💾")
             st.rerun()
             
@@ -321,19 +400,19 @@ if menu == "🏢 Proveedores":
         st.subheader("🗑️ Eliminar Proveedor")
         supp_to_delete = st.selectbox("Selecciona proveedor a eliminar", df_supp['Proveedor'].tolist(), key="del_supp_select")
         if st.button("Eliminar Proveedor Seleccionado"):
-            run_query("DELETE FROM suppliers WHERE name=?", (supp_to_delete,), fetch=False)
+            run_query("DELETE FROM public.suppliers WHERE name=?", (supp_to_delete,), fetch=False)
             st.toast(f"Proveedor '{supp_to_delete}' eliminado.", icon="🗑️")
             st.rerun()
     else:
         st.info("No hay proveedores registrados.")
 
 # ==========================================
-# 7. MÓDULO: PRODUCTOS
+# 8. MÓDULO: PRODUCTOS
 # ==========================================
 elif menu == "📦 Productos":
     st.header("Catálogo de Productos e Inventario")
     
-    df_supp = run_query("SELECT id, name FROM suppliers")
+    df_supp = run_query("SELECT id, name FROM public.suppliers")
     if df_supp.empty:
         st.warning("⚠️ Debe registrar al menos un proveedor antes de crear productos.")
     else:
@@ -353,7 +432,7 @@ elif menu == "📦 Productos":
                         sup_row = df_supp[df_supp['name'] == p_supplier]
                         sup_id = int(sup_row.iloc[0]['id'])
                         try:
-                            run_query("INSERT INTO products (supplier_id, name, base_cost, profit_margin) VALUES (?, ?, ?, ?)",
+                            run_query("INSERT INTO public.products (supplier_id, name, base_cost, profit_margin) VALUES (?, ?, ?, ?)",
                                       (sup_id, p_name.strip(), p_cost, p_margin), fetch=False)
                             st.toast("¡Producto guardado exitosamente!", icon="📦")
                         except psycopg2.IntegrityError:
@@ -364,8 +443,8 @@ elif menu == "📦 Productos":
         
         df_prod_full = run_query("""
             SELECT p.id, p.name as producto_nombre, s.name as proveedor_nombre, p.base_cost, p.profit_margin
-            FROM products p 
-            JOIN suppliers s ON p.supplier_id = s.id
+            FROM public.products p 
+            JOIN public.suppliers s ON p.supplier_id = s.id
         """)
         
         if not df_prod_full.empty:
@@ -398,7 +477,7 @@ elif menu == "📦 Productos":
                     sup_id = int(df_supp[df_supp['name'] == nueva_supp].iloc[0]['id'])
                     try:
                         run_query("""
-                            UPDATE products 
+                            UPDATE public.products 
                             SET supplier_id=?, name=?, base_cost=?, profit_margin=? 
                             WHERE id=?
                         """, (sup_id, nuevo_nombre.strip(), nuevo_costo, nuevo_margen, selected_prod['id']), fetch=False)
@@ -408,7 +487,7 @@ elif menu == "📦 Productos":
                         st.error("Ya existe otro producto registrado con ese nombre.")
 
                 if btn_delete:
-                    run_query("DELETE FROM products WHERE id=?", (selected_prod['id'],), fetch=False)
+                    run_query("DELETE FROM public.products WHERE id=?", (selected_prod['id'],), fetch=False)
                     st.toast("Producto eliminado del inventario.", icon="🗑️")
                     st.rerun()
 
@@ -421,7 +500,7 @@ elif menu == "📦 Productos":
             st.info("No hay productos registrados en el inventario.")
 
 # ==========================================
-# 8. MÓDULO: NUEVO PRESUPUESTO
+# 9. MÓDULO: NUEVO PRESUPUESTO
 # ==========================================
 elif menu == "📝 Nuevo Presupuesto":
     st.header("Módulo de Ventas y Presupuestos")
@@ -433,7 +512,6 @@ elif menu == "📝 Nuevo Presupuesto":
     
     st.subheader("Datos del Cliente")
     cc1, cc2, cc3 = st.columns(3)
-    
     cliente = cc1.text_input("Nombre del Cliente", value=st.session_state.c_name_val, key="c_name_input")
     cliente_doc = cc2.text_input("C.I / RIF", value=st.session_state.c_doc_val, key="c_doc_input")
     cliente_phone = cc3.text_input("Teléfono", value=st.session_state.c_phone_val, key="c_phone_input")
@@ -441,6 +519,16 @@ elif menu == "📝 Nuevo Presupuesto":
     st.session_state.c_name_val = cliente
     st.session_state.c_doc_val = cliente_doc
     st.session_state.c_phone_val = cliente_phone
+
+    st.subheader("Datos del Vehículo")
+    vc1, vc2, vc3 = st.columns(3)
+    veh_name = vc1.text_input("Vehículo / Modelo", value=st.session_state.v_name_val, key="v_name_input")
+    veh_year = vc2.text_input("Año", value=st.session_state.v_year_val, key="v_year_input")
+    veh_plate = vc3.text_input("Placa", value=st.session_state.v_plate_val, key="v_plate_input")
+
+    st.session_state.v_name_val = veh_name
+    st.session_state.v_year_val = veh_year
+    st.session_state.v_plate_val = veh_plate
     
     st.divider()
     
@@ -449,7 +537,7 @@ elif menu == "📝 Nuevo Presupuesto":
     with tab1:
         query_cat = """
             SELECT p.name, p.base_cost, p.profit_margin, s.discount as supplier_discount 
-            FROM products p JOIN suppliers s ON p.supplier_id = s.id
+            FROM public.products p JOIN public.suppliers s ON p.supplier_id = s.id
         """
         df_cat = run_query(query_cat)
         if df_cat.empty:
@@ -544,21 +632,25 @@ elif menu == "📝 Nuevo Presupuesto":
                 fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                 items_json = json.dumps(st.session_state.cart)
                 run_query("""
-                    INSERT INTO saved_budgets (date, client_name, client_doc, client_phone, currency, bcv_rate, total_foreign, total_ves, total_profit_foreign, items_json)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (fecha_actual, cliente, cliente_doc, cliente_phone if cliente_phone else "N/A", moneda_base, tasa_bcv, total_divisa, total_ves, ganancia_total, items_json), fetch=False)
+                    INSERT INTO public.saved_budgets (date, client_name, client_doc, client_phone, currency, bcv_rate, total_foreign, total_ves, total_profit_foreign, items_json, status, vehicle_name, vehicle_year, vehicle_plate)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?)
+                """, (fecha_actual, cliente, cliente_doc, cliente_phone if cliente_phone else "N/A", moneda_base, tasa_bcv, total_divisa, total_ves, ganancia_total, items_json, veh_name, veh_year, veh_plate), fetch=False)
                 
-                st.toast("¡Presupuesto guardado exitosamente!", icon="📝")
+                st.toast("¡Presupuesto guardado como Pendiente!", icon="📝")
                 st.session_state.cart = []
                 st.session_state.c_name_val = ""
                 st.session_state.c_doc_val = ""
                 st.session_state.c_phone_val = ""
+                st.session_state.v_name_val = ""
+                st.session_state.v_year_val = ""
+                st.session_state.v_plate_val = ""
                 st.rerun()
                 
         pdf_bytes = generate_pdf(
             cliente if cliente else "Consumidor Final", 
             cliente_doc if cliente_doc else "N/A", 
             cliente_phone if cliente_phone else "N/A", 
+            veh_name, veh_year, veh_plate,
             datetime.datetime.now().strftime("%Y-%m-%d"), 
             st.session_state.cart, 
             moneda_base, 
@@ -571,26 +663,29 @@ elif menu == "📝 Nuevo Presupuesto":
         st.info("El presupuesto está vacío. Añade productos o mano de obra.")
 
 # ==========================================
-# 9. MÓDULO: GANANCIAS
+# 10. MÓDULO: GANANCIAS
 # ==========================================
 elif menu == "📈 Ganancias":
-    st.header("📊 Resumen y Reportes de Ganancias")
+    st.header("📊 Resumen y Reportes de Ganancias (Presupuestos Aprobados)")
     
-    df_history = run_query("SELECT id, date, client_name, currency, bcv_rate, total_foreign, total_profit_foreign FROM saved_budgets ORDER BY id DESC")
+    df_history = run_query("SELECT id, date, client_name, currency, bcv_rate, total_foreign, total_profit_foreign, status FROM public.saved_budgets ORDER BY id DESC")
     
     if df_history.empty:
-        st.info("No hay presupuestos registrados para consultar ganancias.")
+        st.info("No hay presupuestos registrados.")
     else:
         df_history['date_dt'] = pd.to_datetime(df_history['date'])
         df_history['fecha'] = df_history['date_dt'].dt.strftime('%Y-%m-%d')
         
+        # Filtramos solo los aprobados para ganancias
+        df_approved = df_history[df_history['status'] == 'Aprobado']
+        
         tab_dia, tab_totales = st.tabs(["📅 Consulta por Día", "🗓️ Consulta Acumulada (Semana / Mes / Total)"])
         
         with tab_dia:
-            st.subheader("Ganancias y Presupuestos por Día")
+            st.subheader("Ganancias por Día (Aprobados)")
             fecha_sel = st.date_input("Selecciona la Fecha", datetime.date.today(), key="prof_date_sel")
             
-            df_dia = df_history[df_history['fecha'] == str(fecha_sel)]
+            df_dia = df_approved[df_approved['fecha'] == str(fecha_sel)]
             
             if not df_dia.empty:
                 usd_dia = df_dia[df_dia['currency'] == 'USD']
@@ -609,9 +704,9 @@ elif menu == "📈 Ganancias":
                 c_d3.metric("Total Equivalente en Bolívares", f"{tot_ves_dia:,.2f} Bs.")
                 
                 st.divider()
-                st.write(f"**Presupuestos emitidos el {fecha_sel}:**")
+                st.write(f"**Presupuestos aprobados el {fecha_sel}:**")
                 df_dia_disp = df_dia[['date', 'client_name', 'currency', 'bcv_rate', 'total_foreign', 'total_profit_foreign']].copy()
-                df_dia_disp.columns = ['Hora/Fecha', 'Cliente', 'Moneda', 'Tasa BCV', 'Total Presupuesto', 'Ganancia (Margen)']
+                df_dia_disp.columns = ['Hora/Fecha', 'Cliente', 'Moneda', 'Tasa BCV', 'Total Presupuesto', 'Ganancia']
                 st.dataframe(df_dia_disp, use_container_width=True)
                 
                 pdf_report_dia = generate_profit_report_pdf(
@@ -619,19 +714,19 @@ elif menu == "📈 Ganancias":
                 )
                 st.download_button("📄 Imprimir Reporte PDF del Día", data=pdf_report_dia, file_name=f"Reporte_Ganancias_{fecha_sel}.pdf", mime="application/pdf", key="dl_pdf_dia")
             else:
-                st.warning(f"No hay presupuestos ni ganancias registradas para el día {fecha_sel}.")
+                st.warning(f"No hay presupuestos APROBADOS registrados para el día {fecha_sel}.")
 
         with tab_totales:
-            st.subheader("Ganancias Acumuladas")
+            st.subheader("Ganancias Acumuladas (Aprobados)")
             periodo = st.selectbox("Seleccione el Periodo", ["Última Semana (7 Días)", "Último Mes (30 Días)", "Histórico Completo"])
             
             now = datetime.datetime.now()
             if periodo == "Última Semana (7 Días)":
-                df_filtrado = df_history[df_history['date_dt'] >= (now - datetime.timedelta(days=7))]
+                df_filtrado = df_approved[df_approved['date_dt'] >= (now - datetime.timedelta(days=7))]
             elif periodo == "Último Mes (30 Días)":
-                df_filtrado = df_history[df_history['date_dt'] >= (now - datetime.timedelta(days=30))]
+                df_filtrado = df_approved[df_approved['date_dt'] >= (now - datetime.timedelta(days=30))]
             else:
-                df_filtrado = df_history.copy()
+                df_filtrado = df_approved.copy()
                 
             if not df_filtrado.empty:
                 df_usd = df_filtrado[df_filtrado['currency'] == 'USD']
@@ -650,9 +745,9 @@ elif menu == "📈 Ganancias":
                 col_m3.metric("Total Consolidado Bolívares", f"{tot_ves_acum:,.2f} Bs.")
                 
                 st.divider()
-                st.write("**Detalle de presupuestos agrupados en este periodo:**")
+                st.write("**Detalle de presupuestos aprobados en este periodo:**")
                 df_filt_disp = df_filtrado[['date', 'client_name', 'currency', 'bcv_rate', 'total_foreign', 'total_profit_foreign']].copy()
-                df_filt_disp.columns = ['Fecha', 'Cliente', 'Moneda', 'Tasa BCV', 'Total Presupuesto', 'Ganancia (Margen)']
+                df_filt_disp.columns = ['Fecha', 'Cliente', 'Moneda', 'Tasa BCV', 'Total Presupuesto', 'Ganancia']
                 st.dataframe(df_filt_disp, use_container_width=True)
                 
                 pdf_report_acum = generate_profit_report_pdf(
@@ -660,15 +755,15 @@ elif menu == "📈 Ganancias":
                 )
                 st.download_button("📄 Imprimir Reporte PDF del Periodo", data=pdf_report_acum, file_name=f"Reporte_Ganancias_{periodo.replace(' ', '_')}.pdf", mime="application/pdf", key="dl_pdf_acum")
             else:
-                st.info("No hay registros en el rango de tiempo seleccionado.")
+                st.info("No hay registros aprobados en el rango de tiempo seleccionado.")
 
 # ==========================================
-# 10. MÓDULO: HISTORIAL
+# 11. MÓDULO: HISTORIAL
 # ==========================================
 elif menu == "📂 Historial":
     st.header("📂 Historial de Presupuestos Emitidos")
     
-    df_history = run_query("SELECT id, date, client_name, client_doc, client_phone, currency, bcv_rate, total_foreign, total_ves, items_json FROM saved_budgets ORDER BY id DESC")
+    df_history = run_query("SELECT id, date, client_name, client_doc, client_phone, currency, bcv_rate, total_foreign, total_ves, status, items_json, vehicle_name, vehicle_year, vehicle_plate FROM public.saved_budgets ORDER BY id DESC")
     
     if df_history.empty:
         st.info("No hay presupuestos guardados en el historial.")
@@ -685,15 +780,15 @@ elif menu == "📂 Historial":
             df_hist_dia = df_history[df_history['fecha'] == str(f_sel_hist)]
             
             if not df_hist_dia.empty:
-                df_disp_d = df_hist_dia[['id', 'date', 'client_name', 'client_doc', 'client_phone', 'currency', 'bcv_rate', 'total_foreign', 'total_ves']].copy()
-                df_disp_d.columns = ['ID', 'Fecha/Hora', 'Cliente', 'C.I / RIF', 'Teléfono', 'Moneda', 'Tasa BCV', 'Total Divisa', 'Total VES']
+                df_disp_d = df_hist_dia[['date', 'client_name', 'client_doc', 'client_phone', 'currency', 'bcv_rate', 'total_foreign', 'total_ves', 'status']].copy()
+                df_disp_d.columns = ['Fecha/Hora', 'Cliente', 'C.I / RIF', 'Teléfono', 'Moneda', 'Tasa BCV', 'Total Divisa', 'Total VES', 'Estado']
                 st.dataframe(df_disp_d, use_container_width=True)
                 
                 st.divider()
-                st.subheader("📄 Imprimir Presupuesto del Día")
+                st.subheader("📄 Gestionar / Imprimir Presupuesto")
                 
-                map_d = {f"[{row['id']}] {row['client_name']} - {row['date']} ({row['total_foreign']:.2f} {row['currency']})": row for idx, row in df_hist_dia.iterrows()}
-                p_sel_d = st.selectbox("Seleccione el presupuesto que desea imprimir en PDF", list(map_d.keys()), key="sel_pdf_d")
+                map_d = {f"{row['client_name']} - {row['date']} ({row['total_foreign']:.2f} {row['currency']}) [Estado: {row['status']}]": row for idx, row in df_hist_dia.iterrows()}
+                p_sel_d = st.selectbox("Seleccione el presupuesto", list(map_d.keys()), key="sel_pdf_d")
                 
                 if p_sel_d:
                     row_sel = map_d[p_sel_d]
@@ -701,14 +796,27 @@ elif menu == "📂 Historial":
                     
                     pdf_bytes = generate_pdf(
                         row_sel['client_name'], row_sel['client_doc'], row_sel['client_phone'],
+                        row_sel['vehicle_name'], row_sel['vehicle_year'], row_sel['vehicle_plate'],
                         row_sel['date'], cart_sel, row_sel['currency'], row_sel['bcv_rate'],
                         row_sel['total_foreign'], row_sel['total_ves']
                     )
                     
-                    c_h1, c_h2 = st.columns(2)
-                    c_h1.download_button(f"📄 Descargar PDF de {row_sel['client_name']}", data=pdf_bytes, file_name=f"Presupuesto_{row_sel['client_name']}.pdf", mime="application/pdf", key="dl_pdf_h_d", use_container_width=True)
-                    if c_h2.button("🗑️ Eliminar Presupuesto", key="del_budg_d", use_container_width=True):
-                        run_query("DELETE FROM saved_budgets WHERE id=?", (row_sel['id'],), fetch=False)
+                    c_h1, c_h2, c_h3 = st.columns(3)
+                    c_h1.download_button(f"📄 Descargar PDF", data=pdf_bytes, file_name=f"Presupuesto_{row_sel['client_name']}.pdf", mime="application/pdf", key="dl_pdf_h_d", use_container_width=True)
+                    
+                    if row_sel['status'] == 'Pendiente':
+                        if c_h2.button("✅ Aprobar como Vendido", key="approve_budg_d", use_container_width=True):
+                            run_query("UPDATE public.saved_budgets SET status='Aprobado' WHERE id=?", (row_sel['id'],), fetch=False)
+                            st.toast("¡Presupuesto aprobado como vendido!", icon="✅")
+                            st.rerun()
+                    else:
+                        if c_h2.button("↩️ Cambiar a Pendiente", key="revert_budg_d", use_container_width=True):
+                            run_query("UPDATE public.saved_budgets SET status='Pendiente' WHERE id=?", (row_sel['id'],), fetch=False)
+                            st.toast("Presupuesto cambiado a pendiente.", icon="⚠️")
+                            st.rerun()
+
+                    if c_h3.button("🗑️ Eliminar", key="del_budg_d", use_container_width=True):
+                        run_query("DELETE FROM public.saved_budgets WHERE id=?", (row_sel['id'],), fetch=False)
                         st.toast("Presupuesto eliminado con éxito.", icon="🗑️")
                         st.rerun()
             else:
@@ -727,15 +835,15 @@ elif menu == "📂 Historial":
                 df_hist_filt = df_history.copy()
                 
             if not df_hist_filt.empty:
-                df_disp_a = df_hist_filt[['id', 'date', 'client_name', 'client_doc', 'client_phone', 'currency', 'bcv_rate', 'total_foreign', 'total_ves']].copy()
-                df_disp_a.columns = ['ID', 'Fecha/Hora', 'Cliente', 'C.I / RIF', 'Teléfono', 'Moneda', 'Tasa BCV', 'Total Divisa', 'Total VES']
+                df_disp_a = df_hist_filt[['date', 'client_name', 'client_doc', 'client_phone', 'currency', 'bcv_rate', 'total_foreign', 'total_ves', 'status']].copy()
+                df_disp_a.columns = ['Fecha/Hora', 'Cliente', 'C.I / RIF', 'Teléfono', 'Moneda', 'Tasa BCV', 'Total Divisa', 'Total VES', 'Estado']
                 st.dataframe(df_disp_a, use_container_width=True)
                 
                 st.divider()
-                st.subheader("📄 Imprimir Presupuesto Seleccionado del Periodo")
+                st.subheader("📄 Gestionar / Imprimir Presupuesto Seleccionado")
                 
-                map_a = {f"[{row['id']}] {row['client_name']} - {row['date']} ({row['total_foreign']:.2f} {row['currency']})": row for idx, row in df_hist_filt.iterrows()}
-                p_sel_a = st.selectbox("Seleccione el presupuesto que desea imprimir en PDF", list(map_a.keys()), key="sel_pdf_a")
+                map_a = {f"{row['client_name']} - {row['date']} ({row['total_foreign']:.2f} {row['currency']}) [Estado: {row['status']}]": row for idx, row in df_hist_filt.iterrows()}
+                p_sel_a = st.selectbox("Seleccione el presupuesto", list(map_a.keys()), key="sel_pdf_a")
                 
                 if p_sel_a:
                     row_sel_a = map_a[p_sel_a]
@@ -743,15 +851,65 @@ elif menu == "📂 Historial":
                     
                     pdf_bytes_a = generate_pdf(
                         row_sel_a['client_name'], row_sel_a['client_doc'], row_sel_a['client_phone'],
+                        row_sel_a['vehicle_name'], row_sel_a['vehicle_year'], row_sel_a['vehicle_plate'],
                         row_sel_a['date'], cart_sel_a, row_sel_a['currency'], row_sel_a['bcv_rate'],
                         row_sel_a['total_foreign'], row_sel_a['total_ves']
                     )
                     
-                    col_ha1, col_ha2 = st.columns(2)
-                    col_ha1.download_button(f"📄 Descargar PDF de {row_sel_a['client_name']}", data=pdf_bytes_a, file_name=f"Presupuesto_{row_sel_a['client_name']}.pdf", mime="application/pdf", key="dl_pdf_h_a", use_container_width=True)
-                    if col_ha2.button("🗑️ Eliminar Presupuesto del Historial", key="del_budg_a", use_container_width=True):
-                        run_query("DELETE FROM saved_budgets WHERE id=?", (row_sel_a['id'],), fetch=False)
+                    col_ha1, col_ha2, col_ha3 = st.columns(3)
+                    col_ha1.download_button(f"📄 Descargar PDF", data=pdf_bytes_a, file_name=f"Presupuesto_{row_sel_a['client_name']}.pdf", mime="application/pdf", key="dl_pdf_h_a", use_container_width=True)
+                    
+                    if row_sel_a['status'] == 'Pendiente':
+                        if col_ha2.button("✅ Aprobar como Vendido", key="approve_budg_a", use_container_width=True):
+                            run_query("UPDATE public.saved_budgets SET status='Aprobado' WHERE id=?", (row_sel_a['id'],), fetch=False)
+                            st.toast("¡Presupuesto aprobado como vendido!", icon="✅")
+                            st.rerun()
+                    else:
+                        if col_ha2.button("↩️ Cambiar a Pendiente", key="revert_budg_a", use_container_width=True):
+                            run_query("UPDATE public.saved_budgets SET status='Pendiente' WHERE id=?", (row_sel_a['id'],), fetch=False)
+                            st.toast("Presupuesto cambiado a pendiente.", icon="⚠️")
+                            st.rerun()
+
+                    if col_ha3.button("🗑️ Eliminar", key="del_budg_a", use_container_width=True):
+                        run_query("DELETE FROM public.saved_budgets WHERE id=?", (row_sel_a['id'],), fetch=False)
                         st.toast("Presupuesto eliminado con éxito.", icon="🗑️")
                         st.rerun()
             else:
                 st.info("No hay presupuestos dentro del rango seleccionado.")
+
+# ==========================================
+# 12. MÓDULO: USUARIOS (SOLO ADMINISTRADOR)
+# ==========================================
+elif menu == "👥 Usuarios" and st.session_state.role == 'Administrador':
+    st.header("👥 Gestión de Usuarios y Roles")
+    
+    with st.form("new_user_form", clear_on_submit=True):
+        st.subheader("Crear Nuevo Usuario")
+        new_u = st.text_input("Nombre de Usuario")
+        new_p = st.text_input("Contraseña", type="password")
+        new_r = st.selectbox("Rol", ["Administrador", "Vendedor"])
+        if st.form_submit_button("Guardar Usuario"):
+            if new_u.strip() and new_p.strip():
+                try:
+                    run_query("INSERT INTO public.users (username, password, role) VALUES (?, ?, ?)", (new_u.strip(), new_p.strip(), new_r), fetch=False)
+                    st.toast("¡Usuario creado con éxito!", icon="👥")
+                except psycopg2.IntegrityError:
+                    st.error("El nombre de usuario ya existe.")
+            else:
+                st.error("Complete todos los campos.")
+                
+    st.divider()
+    st.subheader("Usuarios Registrados")
+    df_users = run_query("SELECT id, username, role FROM public.users")
+    if not df_users.empty:
+        df_u_disp = df_users[['username', 'role']].copy()
+        df_u_disp.columns = ['Usuario', 'Rol']
+        st.dataframe(df_u_disp, use_container_width=True)
+        
+        user_to_del = st.selectbox("Seleccionar usuario a eliminar", df_users['username'].tolist(), key="del_u_sel")
+        if user_to_del != 'admin' and st.button("Eliminar Usuario Seleccionado"):
+            run_query("DELETE FROM public.users WHERE username=?", (user_to_del,), fetch=False)
+            st.toast("Usuario eliminado.", icon="🗑️")
+            st.rerun()
+        elif user_to_del == 'admin':
+            st.info("El usuario administrador principal no se puede eliminar.")
