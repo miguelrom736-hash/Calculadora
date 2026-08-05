@@ -173,7 +173,6 @@ def init_db():
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT INTO public.users (username, password, role) VALUES ('admin', 'admin123', 'Administrador')")
 
-    # Asegurar columnas en tablas preexistentes
     for col_def in [
         "total_profit_foreign REAL DEFAULT 0.0",
         "status TEXT DEFAULT 'Pendiente'",
@@ -309,16 +308,16 @@ def generate_pdf(client, doc, phone, veh_name, veh_year, veh_plate, date, cart, 
     for item in cart:
         pdf.cell(100, 8, str(item['name'])[:45], 1)
         pdf.cell(20, 8, str(item['qty']), 1)
-        pdf.cell(35, 8, f"{item['unit_price']:.2f}", 1)
-        pdf.cell(35, 8, f"{item['total']:.2f}", 1)
+        pdf.cell(35, 8, f"{float(item['unit_price']):.2f}", 1)
+        pdf.cell(35, 8, f"{float(item['total']):.2f}", 1)
         pdf.ln()
         
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(120, 10, 'TOTAL CONSOLIDADO:', 0)
-    pdf.cell(70, 10, f"{total_usd:.2f} {currency}", 0, 1, 'R')
-    pdf.cell(120, 10, f'EQUIVALENTE VES (Tasa BCV: {rate_bcv:.2f}):', 0)
-    pdf.cell(70, 10, f"{total_ves:.2f} Bs.", 0, 1, 'R')
+    pdf.cell(70, 10, f"{float(total_usd):.2f} {currency}", 0, 1, 'R')
+    pdf.cell(120, 10, f'EQUIVALENTE VES (Tasa BCV: {float(rate_bcv):.2f}):', 0)
+    pdf.cell(70, 10, f"{float(total_ves):.2f} Bs.", 0, 1, 'R')
     
     return pdf.output(dest="S").encode("latin1")
 
@@ -336,9 +335,9 @@ def generate_profit_report_pdf(title, period_label, total_usd, total_eur, total_
     pdf.set_font('Arial', 'B', 11)
     pdf.cell(0, 7, "RESUMEN CONSOLIDADO DE GANANCIAS (APROBADAS):", 0, 1)
     pdf.set_font('Arial', '', 10)
-    pdf.cell(60, 6, f"Ganancia USD: ${total_usd:,.2f}", 1)
-    pdf.cell(60, 6, f"Ganancia EUR: {total_eur:,.2f}", 1)
-    pdf.cell(70, 6, f"Total Bolivares: {total_ves:,.2f} Bs.", 1)
+    pdf.cell(60, 6, f"Ganancia USD: ${float(total_usd):,.2f}", 1)
+    pdf.cell(60, 6, f"Ganancia EUR: {float(total_eur):,.2f}", 1)
+    pdf.cell(70, 6, f"Total Bolivares: {float(total_ves):,.2f} Bs.", 1)
     pdf.ln(10)
     
     pdf.set_font('Arial', 'B', 9)
@@ -355,9 +354,9 @@ def generate_profit_report_pdf(title, period_label, total_usd, total_eur, total_
         pdf.cell(25, 6, str(row['date'])[:10], 1)
         pdf.cell(45, 6, str(row['client_name'])[:22], 1)
         pdf.cell(20, 6, str(row['currency']), 1)
-        pdf.cell(25, 6, f"{row['bcv_rate']:.2f}", 1)
-        pdf.cell(35, 6, f"{row['total_foreign']:.2f}", 1)
-        pdf.cell(40, 6, f"{row['total_profit_foreign']:.2f}", 1)
+        pdf.cell(25, 6, f"{float(row['bcv_rate']):.2f}", 1)
+        pdf.cell(35, 6, f"{float(row['total_foreign']):.2f}", 1)
+        pdf.cell(40, 6, f"{float(row['total_profit_foreign']):.2f}", 1)
         pdf.ln()
         
     return pdf.output(dest="S").encode("latin1")
@@ -427,7 +426,7 @@ if menu == "🏢 Proveedores":
                 st.error("Por favor ingrese el nombre del proveedor.")
             else:
                 try:
-                    run_query("INSERT INTO public.suppliers (name, discount) VALUES (?, ?)", (s_name.strip(), s_disc), fetch=False)
+                    run_query("INSERT INTO public.suppliers (name, discount) VALUES (?, ?)", (s_name.strip(), float(s_disc)), fetch=False)
                     st.toast("¡Proveedor guardado exitosamente!", icon="🏢")
                 except psycopg2.IntegrityError:
                     st.error("El proveedor ya existe en la base de datos.")
@@ -442,7 +441,7 @@ if menu == "🏢 Proveedores":
         
         if st.button("💾 Actualizar Cambios de Proveedores"):
             for idx, row in edited_supp.iterrows():
-                run_query("UPDATE public.suppliers SET discount=? WHERE name=?", (row['Descuento (%)'], row['Proveedor']), fetch=False)
+                run_query("UPDATE public.suppliers SET discount=? WHERE name=?", (float(row['Descuento (%)']), row['Proveedor']), fetch=False)
             st.toast("Cambios aplicados correctamente.", icon="💾")
             st.rerun()
             
@@ -486,7 +485,7 @@ elif menu == "📦 Productos":
                         sup_id = int(sup_row.iloc[0]['id'])
                         try:
                             run_query("INSERT INTO public.products (supplier_id, name, base_cost, profit_margin) VALUES (?, ?, ?, ?)",
-                                      (sup_id, p_name.strip(), p_cost, p_margin), fetch=False)
+                                      (sup_id, p_name.strip(), float(p_cost), float(p_margin)), fetch=False)
                             st.toast("¡Producto guardado exitosamente!", icon="📦")
                         except psycopg2.IntegrityError:
                             st.error("El nombre del producto ya existe en el catálogo.")
@@ -533,7 +532,7 @@ elif menu == "📦 Productos":
                             UPDATE public.products 
                             SET supplier_id=?, name=?, base_cost=?, profit_margin=? 
                             WHERE id=?
-                        """, (sup_id, nuevo_nombre.strip(), nuevo_costo, nuevo_margen, selected_prod['id']), fetch=False)
+                        """, (sup_id, nuevo_nombre.strip(), float(nuevo_costo), float(nuevo_margen), int(selected_prod['id'])), fetch=False)
                         st.toast("¡Producto actualizado!", icon="✏️")
                         st.rerun()
                     except psycopg2.IntegrityError:
@@ -541,7 +540,7 @@ elif menu == "📦 Productos":
 
                 if btn_delete:
                     try:
-                        run_query("DELETE FROM public.products WHERE id=?", (selected_prod['id'],), fetch=False)
+                        run_query("DELETE FROM public.products WHERE id=?", (int(selected_prod['id']),), fetch=False)
                         st.toast("Producto eliminado del inventario.", icon="🗑️")
                         st.rerun()
                     except Exception as e:
@@ -563,7 +562,7 @@ elif menu == "📝 Nuevo Presupuesto":
     
     c_cfg1, c_cfg2 = st.columns(2)
     moneda_base = c_cfg1.selectbox("Moneda Base del Presupuesto", ["USD", "EUR"], key="pres_curr")
-    tasa_bcv = get_config('tasa_usd') if moneda_base == "USD" else get_config('tasa_eur')
+    tasa_bcv = float(get_config('tasa_usd') if moneda_base == "USD" else get_config('tasa_eur'))
     c_cfg2.metric(f"Tasa BCV Aplicada ({moneda_base})", f"{tasa_bcv:,.2f} Bs.")
     
     st.subheader("Datos del Cliente")
@@ -601,36 +600,39 @@ elif menu == "📝 Nuevo Presupuesto":
         else:
             col_sel, col_qty, col_btn = st.columns([3, 1, 1])
             prod_sel = col_sel.selectbox("Seleccionar Producto", df_cat['name'].tolist(), key="cat_prod_sel")
-            qty_prod = col_qty.number_input("Cant.", min_value=1, value=1, step=1, key="q_prod")
+            qty_prod = int(col_qty.number_input("Cant.", min_value=1, value=1, step=1, key="q_prod"))
             
             if col_btn.button("➕ Añadir Producto", use_container_width=True, key="add_p_cart"):
                 row = df_cat[df_cat['name'] == prod_sel].iloc[0]
-                costo_base = row['base_cost']
-                costo_neto = costo_base * (1 - (row['supplier_discount'] / 100))
-                precio_final = costo_neto * (1 + (row['profit_margin'] / 100))
+                costo_base = float(row['base_cost'])
+                supplier_disc = float(row['supplier_discount'])
+                profit_margin = float(row['profit_margin'])
+                
+                costo_neto = costo_base * (1 - (supplier_disc / 100))
+                precio_final = costo_neto * (1 + (profit_margin / 100))
                 ganancia_unid = precio_final - costo_neto
                 
                 st.session_state.cart.append({
                     "type": "PRODUCTO",
-                    "name": row['name'],
+                    "name": str(row['name']),
                     "qty": qty_prod,
-                    "unit_price": precio_final,
-                    "profit": ganancia_unid * qty_prod,
-                    "total": precio_final * qty_prod
+                    "unit_price": float(precio_final),
+                    "profit": float(ganancia_unid * qty_prod),
+                    "total": float(precio_final * qty_prod)
                 })
                 st.rerun()
                 
     with tab2:
         col_m1, col_m2, col_m3, col_m4, col_mbtn = st.columns([2, 1, 1, 1, 1])
         desc_labor = col_m1.text_input("Descripción del Trabajo o Servicio", key="labor_desc")
-        qty_labor = col_m2.number_input("Cant.", min_value=1, value=1, step=1, key="q_labor")
-        precio_labor = col_m3.number_input("Precio Neto Unitario", min_value=0.0, step=1.0, format="%.2f", key="labor_price")
+        qty_labor = int(col_m2.number_input("Cant.", min_value=1, value=1, step=1, key="q_labor"))
+        precio_labor = float(col_m3.number_input("Precio Neto Unitario", min_value=0.0, step=1.0, format="%.2f", key="labor_price"))
         moneda_labor = col_m4.selectbox("Moneda", ["USD", "EUR"], key="labor_curr")
         
         if col_mbtn.button("➕ Añadir Labor", use_container_width=True, key="add_l_cart"):
             if desc_labor:
-                tasa_u = get_config('tasa_usd')
-                tasa_e = get_config('tasa_eur')
+                tasa_u = float(get_config('tasa_usd'))
+                tasa_e = float(get_config('tasa_eur'))
                 
                 precio_final_labor = precio_labor
                 if moneda_labor != moneda_base:
@@ -643,11 +645,11 @@ elif menu == "📝 Nuevo Presupuesto":
                             
                 st.session_state.cart.append({
                     "type": "LABOR",
-                    "name": f"[Servicio] {desc_labor} ({precio_labor} {moneda_labor})",
+                    "name": f"[Servicio] {str(desc_labor)} ({precio_labor} {moneda_labor})",
                     "qty": qty_labor,
-                    "unit_price": precio_final_labor,
-                    "profit": precio_final_labor * qty_labor,
-                    "total": precio_final_labor * qty_labor
+                    "unit_price": float(precio_final_labor),
+                    "profit": float(precio_final_labor * qty_labor),
+                    "total": float(precio_final_labor * qty_labor)
                 })
                 st.rerun()
             else:
@@ -657,22 +659,24 @@ elif menu == "📝 Nuevo Presupuesto":
     st.subheader("🛒 Detalle del Presupuesto Actual")
     
     if st.session_state.cart:
-        total_divisa = 0
-        ganancia_total = 0
+        total_divisa = 0.0
+        ganancia_total = 0.0
         
         for i, item in enumerate(st.session_state.cart):
             col_item = st.columns([4, 1, 2, 2, 1])
             col_item[0].write(item['name'])
-            col_item[1].write(f"x{item['qty']}")
-            col_item[2].write(f"{item['unit_price']:,.2f} {moneda_base}")
-            col_item[3].write(f"{item['total']:,.2f} {moneda_base}")
+            col_item[1].write(f"x{int(item['qty'])}")
+            col_item[2].write(f"{float(item['unit_price']):,.2f} {moneda_base}")
+            col_item[3].write(f"{float(item['total']):,.2f} {moneda_base}")
             if col_item[4].button("❌", key=f"del_cart_{i}", help="Eliminar este ítem"):
                 st.session_state.cart.pop(i)
                 st.rerun()
-            total_divisa += item['total']
-            ganancia_total += item.get('profit', 0)
+            total_divisa += float(item['total'])
+            ganancia_total += float(item.get('profit', 0.0))
             
-        total_ves = total_divisa * tasa_bcv
+        total_divisa = float(total_divisa)
+        ganancia_total = float(ganancia_total)
+        total_ves = float(total_divisa * tasa_bcv)
         
         c_met1, c_met2 = st.columns(2)
         c_met1.metric(f"Total Presupuesto ({moneda_base})", f"{total_divisa:,.2f}")
@@ -687,10 +691,25 @@ elif menu == "📝 Nuevo Presupuesto":
             else:
                 fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                 items_json = json.dumps(st.session_state.cart)
+                
                 run_query("""
                     INSERT INTO public.saved_budgets (date, client_name, client_doc, client_phone, currency, bcv_rate, total_foreign, total_ves, total_profit_foreign, items_json, status, vehicle_name, vehicle_year, vehicle_plate)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?)
-                """, (fecha_actual, cliente, cliente_doc, cliente_phone if cliente_phone else "N/A", moneda_base, tasa_bcv, total_divisa, total_ves, ganancia_total, items_json, veh_name, veh_year, veh_plate), fetch=False)
+                """, (
+                    str(fecha_actual), 
+                    str(cliente), 
+                    str(cliente_doc), 
+                    str(cliente_phone if cliente_phone else "N/A"), 
+                    str(moneda_base), 
+                    float(tasa_bcv), 
+                    float(total_divisa), 
+                    float(total_ves), 
+                    float(ganancia_total), 
+                    str(items_json), 
+                    str(veh_name), 
+                    str(veh_year), 
+                    str(veh_plate)
+                ), fetch=False)
                 
                 st.toast("¡Presupuesto guardado como Pendiente!", icon="📝")
                 st.session_state.cart = []
@@ -703,16 +722,16 @@ elif menu == "📝 Nuevo Presupuesto":
                 st.rerun()
                 
         pdf_bytes = generate_pdf(
-            cliente if cliente else "Consumidor Final", 
-            cliente_doc if cliente_doc else "N/A", 
-            cliente_phone if cliente_phone else "N/A", 
-            veh_name, veh_year, veh_plate,
+            str(cliente if cliente else "Consumidor Final"), 
+            str(cliente_doc if cliente_doc else "N/A"), 
+            str(cliente_phone if cliente_phone else "N/A"), 
+            str(veh_name), str(veh_year), str(veh_plate),
             datetime.datetime.now().strftime("%Y-%m-%d"), 
             st.session_state.cart, 
-            moneda_base, 
-            tasa_bcv, 
-            total_divisa, 
-            total_ves
+            str(moneda_base), 
+            float(tasa_bcv), 
+            float(total_divisa), 
+            float(total_ves)
         )
         c_save2.download_button("📄 Descargar PDF Oficial", data=pdf_bytes, file_name="Presupuesto.pdf", mime="application/pdf", key="dl_pdf_curr", use_container_width=True)
     else:
@@ -746,11 +765,11 @@ elif menu == "📈 Ganancias":
                 usd_dia = df_dia[df_dia['currency'] == 'USD']
                 eur_dia = df_dia[df_dia['currency'] == 'EUR']
                 
-                g_usd_dia = usd_dia['total_profit_foreign'].sum()
-                g_eur_dia = eur_dia['total_profit_foreign'].sum()
+                g_usd_dia = float(usd_dia['total_profit_foreign'].sum()) if not usd_dia.empty else 0.0
+                g_eur_dia = float(eur_dia['total_profit_foreign'].sum()) if not eur_dia.empty else 0.0
                 
-                ves_usd_dia = (usd_dia['total_profit_foreign'] * usd_dia['bcv_rate']).sum()
-                ves_eur_dia = (eur_dia['total_profit_foreign'] * eur_dia['bcv_rate']).sum()
+                ves_usd_dia = float((usd_dia['total_profit_foreign'] * usd_dia['bcv_rate']).sum()) if not usd_dia.empty else 0.0
+                ves_eur_dia = float((eur_dia['total_profit_foreign'] * eur_dia['bcv_rate']).sum()) if not eur_dia.empty else 0.0
                 tot_ves_dia = ves_usd_dia + ves_eur_dia
                 
                 c_d1, c_d2, c_d3 = st.columns(3)
@@ -787,11 +806,11 @@ elif menu == "📈 Ganancias":
                 df_usd = df_filtrado[df_filtrado['currency'] == 'USD']
                 df_eur = df_filtrado[df_filtrado['currency'] == 'EUR']
                 
-                tot_usd_profit = df_usd['total_profit_foreign'].sum()
-                tot_eur_profit = df_eur['total_profit_foreign'].sum()
+                tot_usd_profit = float(df_usd['total_profit_foreign'].sum()) if not df_usd.empty else 0.0
+                tot_eur_profit = float(df_eur['total_profit_foreign'].sum()) if not df_eur.empty else 0.0
                 
-                ves_conv_usd = (df_usd['total_profit_foreign'] * df_usd['bcv_rate']).sum()
-                ves_conv_eur = (df_eur['total_profit_foreign'] * df_eur['bcv_rate']).sum()
+                ves_conv_usd = float((df_usd['total_profit_foreign'] * df_usd['bcv_rate']).sum()) if not df_usd.empty else 0.0
+                ves_conv_eur = float((df_eur['total_profit_foreign'] * df_eur['bcv_rate']).sum()) if not df_eur.empty else 0.0
                 tot_ves_acum = ves_conv_usd + ves_conv_eur
                 
                 col_m1, col_m2, col_m3 = st.columns(3)
@@ -852,8 +871,8 @@ elif menu == "📂 Historial":
                     pdf_bytes = generate_pdf(
                         row_sel['client_name'], row_sel['client_doc'], row_sel['client_phone'],
                         row_sel['vehicle_name'], row_sel['vehicle_year'], row_sel['vehicle_plate'],
-                        row_sel['date'], cart_sel, row_sel['currency'], row_sel['bcv_rate'],
-                        row_sel['total_foreign'], row_sel['total_ves']
+                        row_sel['date'], cart_sel, row_sel['currency'], float(row_sel['bcv_rate']),
+                        float(row_sel['total_foreign']), float(row_sel['total_ves'])
                     )
                     
                     c_h1, c_h2, c_h3 = st.columns(3)
@@ -861,18 +880,18 @@ elif menu == "📂 Historial":
                     
                     if row_sel['status'] == 'Pendiente':
                         if c_h2.button("✅ Aprobar como Vendido", key="approve_budg_d", use_container_width=True):
-                            run_query("UPDATE public.saved_budgets SET status='Aprobado' WHERE id=?", (row_sel['id'],), fetch=False)
+                            run_query("UPDATE public.saved_budgets SET status='Aprobado' WHERE id=?", (int(row_sel['id']),), fetch=False)
                             st.toast("¡Presupuesto aprobado como vendido!", icon="✅")
                             st.rerun()
                     else:
                         if c_h2.button("↩️ Cambiar a Pendiente", key="revert_budg_d", use_container_width=True):
-                            run_query("UPDATE public.saved_budgets SET status='Pendiente' WHERE id=?", (row_sel['id'],), fetch=False)
+                            run_query("UPDATE public.saved_budgets SET status='Pendiente' WHERE id=?", (int(row_sel['id']),), fetch=False)
                             st.toast("Presupuesto cambiado a pendiente.", icon="⚠️")
                             st.rerun()
 
                     if c_h3.button("🗑️ Eliminar", key="del_budg_d", use_container_width=True):
                         try:
-                            run_query("DELETE FROM public.saved_budgets WHERE id=?", (row_sel['id'],), fetch=False)
+                            run_query("DELETE FROM public.saved_budgets WHERE id=?", (int(row_sel['id']),), fetch=False)
                             st.toast("Presupuesto eliminado con éxito.", icon="🗑️")
                             st.rerun()
                         except Exception as e:
@@ -910,8 +929,8 @@ elif menu == "📂 Historial":
                     pdf_bytes_a = generate_pdf(
                         row_sel_a['client_name'], row_sel_a['client_doc'], row_sel_a['client_phone'],
                         row_sel_a['vehicle_name'], row_sel_a['vehicle_year'], row_sel_a['vehicle_plate'],
-                        row_sel_a['date'], cart_sel_a, row_sel_a['currency'], row_sel_a['bcv_rate'],
-                        row_sel_a['total_foreign'], row_sel_a['total_ves']
+                        row_sel_a['date'], cart_sel_a, row_sel_a['currency'], float(row_sel_a['bcv_rate']),
+                        float(row_sel_a['total_foreign']), float(row_sel_a['total_ves'])
                     )
                     
                     col_ha1, col_ha2, col_ha3 = st.columns(3)
@@ -919,18 +938,18 @@ elif menu == "📂 Historial":
                     
                     if row_sel_a['status'] == 'Pendiente':
                         if col_ha2.button("✅ Aprobar como Vendido", key="approve_budg_a", use_container_width=True):
-                            run_query("UPDATE public.saved_budgets SET status='Aprobado' WHERE id=?", (row_sel_a['id'],), fetch=False)
+                            run_query("UPDATE public.saved_budgets SET status='Aprobado' WHERE id=?", (int(row_sel_a['id']),), fetch=False)
                             st.toast("¡Presupuesto aprobado como vendido!", icon="✅")
                             st.rerun()
                     else:
                         if col_ha2.button("↩️ Cambiar a Pendiente", key="revert_budg_a", use_container_width=True):
-                            run_query("UPDATE public.saved_budgets SET status='Pendiente' WHERE id=?", (row_sel_a['id'],), fetch=False)
+                            run_query("UPDATE public.saved_budgets SET status='Pendiente' WHERE id=?", (int(row_sel_a['id']),), fetch=False)
                             st.toast("Presupuesto cambiado a pendiente.", icon="⚠️")
                             st.rerun()
 
                     if col_ha3.button("🗑️ Eliminar", key="del_budg_a", use_container_width=True):
                         try:
-                            run_query("DELETE FROM public.saved_budgets WHERE id=?", (row_sel_a['id'],), fetch=False)
+                            run_query("DELETE FROM public.saved_budgets WHERE id=?", (int(row_sel_a['id']),), fetch=False)
                             st.toast("Presupuesto eliminado con éxito.", icon="🗑️")
                             st.rerun()
                         except Exception as e:
