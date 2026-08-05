@@ -128,7 +128,8 @@ def init_db():
             status TEXT DEFAULT 'Pendiente',
             vehicle_name TEXT DEFAULT '',
             vehicle_year TEXT DEFAULT '',
-            vehicle_plate TEXT DEFAULT ''
+            vehicle_plate TEXT DEFAULT '',
+            username TEXT DEFAULT ''
         )
     """)
 
@@ -178,7 +179,8 @@ def init_db():
         "status TEXT DEFAULT 'Pendiente'",
         "vehicle_name TEXT DEFAULT ''",
         "vehicle_year TEXT DEFAULT ''",
-        "vehicle_plate TEXT DEFAULT ''"
+        "vehicle_plate TEXT DEFAULT ''",
+        "username TEXT DEFAULT ''"
     ]:
         try:
             cursor.execute(f"ALTER TABLE public.saved_budgets ADD COLUMN IF NOT EXISTS {col_def}")
@@ -281,7 +283,7 @@ class PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 15)
         self.set_text_color(16, 185, 129)
-        self.cell(0, 10, 'CALCULADORA RSV - REPORTE OFICIAL', 0, 1, 'C')
+        self.cell(0, 10, 'RUEDAS Y SUSPENSIONES C.A', 0, 1, 'C')
         self.ln(5)
 
 def generate_pdf(client, doc, phone, veh_name, veh_year, veh_plate, date, cart, currency, rate_bcv, total_usd, total_ves):
@@ -318,6 +320,11 @@ def generate_pdf(client, doc, phone, veh_name, veh_year, veh_plate, date, cart, 
     pdf.cell(70, 10, f"{float(total_usd):.2f} {currency}", 0, 1, 'R')
     pdf.cell(120, 10, f'EQUIVALENTE VES (Tasa BCV: {float(rate_bcv):.2f}):', 0)
     pdf.cell(70, 10, f"{float(total_ves):.2f} Bs.", 0, 1, 'R')
+    
+    pdf.ln(10)
+    pdf.set_font('Arial', 'I', 9)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 5, 'Nota: Presupuesto sujeto a cambios.', 0, 1, 'L')
     
     return pdf.output(dest="S").encode("latin1")
 
@@ -587,7 +594,7 @@ elif menu == "📝 Nuevo Presupuesto":
     
     st.divider()
     
-    tab1, tab2 = st.tabs(["🛒 Agregar Producto del Catálogo", "👷 Agregar Mano de Obra (Manual)"])
+    tab1, tab2 = st.tabs(["🛒 Agregar Producto del Catálogo", "👷 Agregar Mano de Obra"])
     
     with tab1:
         query_cat = """
@@ -645,7 +652,7 @@ elif menu == "📝 Nuevo Presupuesto":
                             
                 st.session_state.cart.append({
                     "type": "LABOR",
-                    "name": f"[Servicio] {str(desc_labor)} ({precio_labor} {moneda_labor})",
+                    "name": f"{str(desc_labor)} ({precio_labor} {moneda_labor})",
                     "qty": qty_labor,
                     "unit_price": float(precio_final_labor),
                     "profit": float(precio_final_labor * qty_labor),
@@ -693,8 +700,8 @@ elif menu == "📝 Nuevo Presupuesto":
                 items_json = json.dumps(st.session_state.cart)
                 
                 run_query("""
-                    INSERT INTO public.saved_budgets (date, client_name, client_doc, client_phone, currency, bcv_rate, total_foreign, total_ves, total_profit_foreign, items_json, status, vehicle_name, vehicle_year, vehicle_plate)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?)
+                    INSERT INTO public.saved_budgets (date, client_name, client_doc, client_phone, currency, bcv_rate, total_foreign, total_ves, total_profit_foreign, items_json, status, vehicle_name, vehicle_year, vehicle_plate, username)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, ?)
                 """, (
                     str(fecha_actual), 
                     str(cliente), 
@@ -708,7 +715,8 @@ elif menu == "📝 Nuevo Presupuesto":
                     str(items_json), 
                     str(veh_name), 
                     str(veh_year), 
-                    str(veh_plate)
+                    str(veh_plate),
+                    str(st.session_state.username)
                 ), fetch=False)
                 
                 st.toast("¡Presupuesto guardado como Pendiente!", icon="📝")
@@ -733,7 +741,7 @@ elif menu == "📝 Nuevo Presupuesto":
             float(total_divisa), 
             float(total_ves)
         )
-        c_save2.download_button("📄 Descargar PDF Oficial", data=pdf_bytes, file_name="Presupuesto.pdf", mime="application/pdf", key="dl_pdf_curr", use_container_width=True)
+        c_save2.download_button("📄 Descargar PDF", data=pdf_bytes, file_name="Presupuesto.pdf", mime="application/pdf", key="dl_pdf_curr", use_container_width=True)
     else:
         st.info("El presupuesto está vacío. Añade productos o mano de obra.")
 
@@ -741,7 +749,7 @@ elif menu == "📝 Nuevo Presupuesto":
 # 10. MÓDULO: GANANCIAS
 # ==========================================
 elif menu == "📈 Ganancias":
-    st.header("📊 Resumen y Reportes de Ganancias (Presupuestos Aprobados)")
+    st.header("📊 Resumen y Reportes de Ganancias")
     
     df_history = run_query("SELECT id, date, client_name, currency, bcv_rate, total_foreign, total_profit_foreign, status FROM public.saved_budgets ORDER BY id DESC")
     
@@ -756,7 +764,7 @@ elif menu == "📈 Ganancias":
         tab_dia, tab_totales = st.tabs(["📅 Consulta por Día", "🗓️ Consulta Acumulada (Semana / Mes / Total)"])
         
         with tab_dia:
-            st.subheader("Ganancias por Día (Aprobados)")
+            st.subheader("Ganancias por Día")
             fecha_sel = st.date_input("Selecciona la Fecha", datetime.date.today(), key="prof_date_sel")
             
             df_dia = df_approved[df_approved['fecha'] == str(fecha_sel)]
@@ -791,7 +799,7 @@ elif menu == "📈 Ganancias":
                 st.warning(f"No hay presupuestos APROBADOS registrados para el día {fecha_sel}.")
 
         with tab_totales:
-            st.subheader("Ganancias Acumuladas (Aprobados)")
+            st.subheader("Ganancias Acumuladas")
             periodo = st.selectbox("Seleccione el Periodo", ["Última Semana (7 Días)", "Último Mes (30 Días)", "Histórico Completo"])
             
             now = datetime.datetime.now()
@@ -837,7 +845,7 @@ elif menu == "📈 Ganancias":
 elif menu == "📂 Historial":
     st.header("📂 Historial de Presupuestos Emitidos")
     
-    df_history = run_query("SELECT id, date, client_name, client_doc, client_phone, currency, bcv_rate, total_foreign, total_ves, status, items_json, vehicle_name, vehicle_year, vehicle_plate FROM public.saved_budgets ORDER BY id DESC")
+    df_history = run_query("SELECT id, date, client_name, client_doc, client_phone, currency, bcv_rate, total_foreign, total_ves, status, items_json, vehicle_name, vehicle_year, vehicle_plate, username FROM public.saved_budgets ORDER BY id DESC")
     
     if df_history.empty:
         st.info("No hay presupuestos guardados en el historial.")
@@ -854,8 +862,8 @@ elif menu == "📂 Historial":
             df_hist_dia = df_history[df_history['fecha'] == str(f_sel_hist)]
             
             if not df_hist_dia.empty:
-                df_disp_d = df_hist_dia[['date', 'client_name', 'client_doc', 'client_phone', 'currency', 'bcv_rate', 'total_foreign', 'total_ves', 'status']].copy()
-                df_disp_d.columns = ['Fecha/Hora', 'Cliente', 'C.I / RIF', 'Teléfono', 'Moneda', 'Tasa BCV', 'Total Divisa', 'Total VES', 'Estado']
+                df_disp_d = df_hist_dia[['date', 'client_name', 'client_doc', 'client_phone', 'currency', 'bcv_rate', 'total_foreign', 'total_ves', 'status', 'username']].copy()
+                df_disp_d.columns = ['Fecha/Hora', 'Cliente', 'C.I / RIF', 'Teléfono', 'Moneda', 'Tasa BCV', 'Total Divisa', 'Total VES', 'Estado', 'Creado por']
                 st.dataframe(df_disp_d, use_container_width=True)
                 
                 st.divider()
@@ -912,8 +920,8 @@ elif menu == "📂 Historial":
                 df_hist_filt = df_history.copy()
                 
             if not df_hist_filt.empty:
-                df_disp_a = df_hist_filt[['date', 'client_name', 'client_doc', 'client_phone', 'currency', 'bcv_rate', 'total_foreign', 'total_ves', 'status']].copy()
-                df_disp_a.columns = ['Fecha/Hora', 'Cliente', 'C.I / RIF', 'Teléfono', 'Moneda', 'Tasa BCV', 'Total Divisa', 'Total VES', 'Estado']
+                df_disp_a = df_hist_filt[['date', 'client_name', 'client_doc', 'client_phone', 'currency', 'bcv_rate', 'total_foreign', 'total_ves', 'status', 'username']].copy()
+                df_disp_a.columns = ['Fecha/Hora', 'Cliente', 'C.I / RIF', 'Teléfono', 'Moneda', 'Tasa BCV', 'Total Divisa', 'Total VES', 'Estado', 'Creado por']
                 st.dataframe(df_disp_a, use_container_width=True)
                 
                 st.divider()
