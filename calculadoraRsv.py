@@ -174,7 +174,9 @@ def init_db():
     if cursor.fetchone()[0] == 0:
         cursor.execute("INSERT INTO public.users (username, password, role) VALUES ('admin', 'admin123', 'Administrador')")
 
+    # Asegurar columnas en tablas preexistentes
     for col_def in [
+        "total_profit_foreign REAL DEFAULT 0.0",
         "status TEXT DEFAULT 'Pendiente'",
         "vehicle_name TEXT DEFAULT ''",
         "vehicle_year TEXT DEFAULT ''",
@@ -331,7 +333,7 @@ def generate_profit_report_pdf(title, period_label, total_usd, total_eur, total_
     pdf.ln(5)
     
     pdf.set_font('Arial', 'B', 11)
-    pdf.cell(0, 7, "RESUMEN CONSOLIDADO DE GANANCIAS:", 0, 1)
+    pdf.cell(0, 7, "RESUMEN CONSOLIDADO DE GANANCIAS (APROBADAS):", 0, 1)
     pdf.set_font('Arial', '', 10)
     pdf.cell(60, 6, f"Ganancia USD: ${total_usd:,.2f}", 1)
     pdf.cell(60, 6, f"Ganancia EUR: {total_eur:,.2f}", 1)
