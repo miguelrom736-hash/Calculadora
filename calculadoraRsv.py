@@ -83,7 +83,6 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     
-    # Forzar la creación del esquema public si no existe
     cursor.execute("CREATE SCHEMA IF NOT EXISTS public;")
     
     cursor.execute("""
@@ -184,8 +183,9 @@ def init_db():
     ]:
         try:
             cursor.execute(f"ALTER TABLE public.saved_budgets ADD COLUMN IF NOT EXISTS {col_def}")
+            conn.commit()
         except Exception:
-            pass
+            conn.rollback()
 
     conn.commit()
     cursor.close()
@@ -206,6 +206,7 @@ def run_query(query, params=(), fetch=True):
             return pd.DataFrame(data, columns=columns) if data else pd.DataFrame(columns=columns)
     except Exception as e:
         conn.rollback()
+        st.error(f"❌ Error detallado en la Base de Datos: {e}")
         raise e
     finally:
         cursor.close()
