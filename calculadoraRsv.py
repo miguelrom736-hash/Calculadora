@@ -218,12 +218,13 @@ def check_permission(role_name, module_name):
     return not df.empty
 
 # ==========================================
-# 3. AUTENTICACIÓN Y LOGIN
+# 3. AUTENTICACIÓN Y LOGIN (CENTRADO)
 # ==========================================
 if not st.session_state.logged_in:
-    st.title("🔐 Acceso al Sistema - Calculadora RSV")
-    col1, col2 = st.columns([1, 1])
-    with col1:
+    _, col_center, _ = st.columns([1, 2, 1])
+    with col_center:
+        st.markdown("<br><br>", unsafe_allow_html=True)
+        st.title("🔐 Acceso - Calculadora RSV")
         with st.form("login_form"):
             u_input = st.text_input("Usuario")
             p_input = st.text_input("Contraseña", type="password")
@@ -443,9 +444,12 @@ if menu == "🏢 Proveedores":
         st.subheader("🗑️ Eliminar Proveedor")
         supp_to_delete = st.selectbox("Selecciona proveedor a eliminar", df_supp['Proveedor'].tolist(), key="del_supp_select")
         if st.button("Eliminar Proveedor Seleccionado"):
-            run_query("DELETE FROM public.suppliers WHERE name=?", (supp_to_delete,), fetch=False)
-            st.toast(f"Proveedor '{supp_to_delete}' eliminado.", icon="🗑️")
-            st.rerun()
+            try:
+                run_query("DELETE FROM public.suppliers WHERE name=?", (supp_to_delete,), fetch=False)
+                st.toast(f"Proveedor '{supp_to_delete}' eliminado.", icon="🗑️")
+                st.rerun()
+            except Exception as e:
+                st.error(f"No se pudo eliminar el proveedor: {e}")
     else:
         st.info("No hay proveedores registrados.")
 
@@ -530,9 +534,12 @@ elif menu == "📦 Productos":
                         st.error("Ya existe otro producto registrado con ese nombre.")
 
                 if btn_delete:
-                    run_query("DELETE FROM public.products WHERE id=?", (selected_prod['id'],), fetch=False)
-                    st.toast("Producto eliminado del inventario.", icon="🗑️")
-                    st.rerun()
+                    try:
+                        run_query("DELETE FROM public.products WHERE id=?", (selected_prod['id'],), fetch=False)
+                        st.toast("Producto eliminado del inventario.", icon="🗑️")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"No se pudo eliminar el producto: {e}")
 
             st.divider()
             st.subheader("Catálogo de Productos Guardados")
@@ -858,9 +865,12 @@ elif menu == "📂 Historial":
                             st.rerun()
 
                     if c_h3.button("🗑️ Eliminar", key="del_budg_d", use_container_width=True):
-                        run_query("DELETE FROM public.saved_budgets WHERE id=?", (row_sel['id'],), fetch=False)
-                        st.toast("Presupuesto eliminado con éxito.", icon="🗑️")
-                        st.rerun()
+                        try:
+                            run_query("DELETE FROM public.saved_budgets WHERE id=?", (row_sel['id'],), fetch=False)
+                            st.toast("Presupuesto eliminado con éxito.", icon="🗑️")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"No se pudo eliminar el presupuesto: {e}")
             else:
                 st.warning(f"No hay presupuestos registrados el día {f_sel_hist}.")
 
@@ -913,9 +923,12 @@ elif menu == "📂 Historial":
                             st.rerun()
 
                     if col_ha3.button("🗑️ Eliminar", key="del_budg_a", use_container_width=True):
-                        run_query("DELETE FROM public.saved_budgets WHERE id=?", (row_sel_a['id'],), fetch=False)
-                        st.toast("Presupuesto eliminado con éxito.", icon="🗑️")
-                        st.rerun()
+                        try:
+                            run_query("DELETE FROM public.saved_budgets WHERE id=?", (row_sel_a['id'],), fetch=False)
+                            st.toast("Presupuesto eliminado con éxito.", icon="🗑️")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"No se pudo eliminar el presupuesto: {e}")
             else:
                 st.info("No hay presupuestos dentro del rango seleccionado.")
 
@@ -954,9 +967,12 @@ elif menu == "👥 Usuarios":
         
         user_to_del = st.selectbox("Seleccionar usuario a eliminar", df_users['username'].tolist(), key="del_u_sel")
         if user_to_del != 'admin' and st.button("Eliminar Usuario Seleccionado"):
-            run_query("DELETE FROM public.users WHERE username=?", (user_to_del,), fetch=False)
-            st.toast("Usuario eliminado.", icon="🗑️")
-            st.rerun()
+            try:
+                run_query("DELETE FROM public.users WHERE username=?", (user_to_del,), fetch=False)
+                st.toast("Usuario eliminado.", icon="🗑️")
+                st.rerun()
+            except Exception as e:
+                st.error(f"No se pudo eliminar el usuario: {e}")
         elif user_to_del == 'admin':
             st.info("El usuario administrador principal no se puede eliminar.")
 
@@ -1009,9 +1025,12 @@ elif menu == "🛡️ Roles y Permisos":
         if selected_role_config not in ["Administrador", "Vendedor"]:
             st.divider()
             if st.button(f"🗑️ Eliminar Rol '{selected_role_config}'", use_container_width=True):
-                run_query("DELETE FROM public.roles WHERE name = ?", (selected_role_config,), fetch=False)
-                run_query("DELETE FROM public.role_permissions WHERE role_name = ?", (selected_role_config,), fetch=False)
-                st.toast(f"Rol '{selected_role_config}' eliminado.", icon="🗑️")
-                st.rerun()
+                try:
+                    run_query("DELETE FROM public.roles WHERE name = ?", (selected_role_config,), fetch=False)
+                    run_query("DELETE FROM public.role_permissions WHERE role_name = ?", (selected_role_config,), fetch=False)
+                    st.toast(f"Rol '{selected_role_config}' eliminado.", icon="🗑️")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"No se pudo eliminar el rol: {e}")
     else:
         st.info("No hay roles creados.")
