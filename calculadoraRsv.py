@@ -83,6 +83,9 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
     
+    # Forzar la creación del esquema public si no existe
+    cursor.execute("CREATE SCHEMA IF NOT EXISTS public;")
+    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS public.suppliers (
             id SERIAL PRIMARY KEY,
@@ -328,7 +331,7 @@ def generate_profit_report_pdf(title, period_label, total_usd, total_eur, total_
     pdf.ln(5)
     
     pdf.set_font('Arial', 'B', 11)
-    pdf.cell(0, 7, "RESUMEN CONSOLIDADO DE GANANCIAS (APROBADAS):", 0, 1)
+    pdf.cell(0, 7, "RESUMEN CONSOLIDADO DE GANANCIAS:", 0, 1)
     pdf.set_font('Arial', '', 10)
     pdf.cell(60, 6, f"Ganancia USD: ${total_usd:,.2f}", 1)
     pdf.cell(60, 6, f"Ganancia EUR: {total_eur:,.2f}", 1)
